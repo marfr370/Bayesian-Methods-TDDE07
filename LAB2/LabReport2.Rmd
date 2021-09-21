@@ -1,0 +1,285 @@
+---
+title: "TDDE07 - Lab 2"
+author: |
+        | Johannes Hägerlind - johha451
+        | Martin Friberg - marfr370
+date: "2021/04/29"
+output:
+  pdf_document:
+    fig_caption: true
+    number_sections: true
+    latex_engine: xelatex
+
+  html_document:
+    df_print: paged
+header-includes:
+  - \usepackage{caption}
+  - \usepackage{float}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+\newpage
+# Assignment 1.
+## Question a)
+For linear regression with a conjugate prior we have that $$\sigma^2 \sim Inv - \chi^2 (\nu_0, \sigma^2_0)$$ 
+
+To simulate from the prior, we can draw random draws of $\sigma^2$ from $$X \sim \chi^2 (n-1))$$ where n-1 is $\nu_0$ in our case, since we have unknown variance. Thereafter we compute $$\sigma^2 = {\nu_0*\sigma^2_0 \over X}$$. To simulate the $\beta$:s we can make draws from the multivariate normal distribution $$\beta|\sigma^2 \sim N (\mu_0, \sigma^2\Omega^{-1}_0) $$
+where $\mu_0$ is our prior belief about the $\beta$:s. We thereafter obtain different values for the temperature on specific dates based on the draws of $\beta$:s through the quadratic regression: $$temp = \beta_0 + \beta_1 * time + \beta_2 * time^2 + \epsilon, \epsilon \sim N(0, \sigma^2). $$ The regression curves obtained for each of the draws from the default values of the hyperparameters as well as after tuning was done to fit the data can be seen in the plot below. The tuning was based on making the regression lines as similar to the actual data as possible with a peak in mid july of circa 22 degrees as well as lows in january and December. Here, mid july corresponds to 0.53 on the x-axis. The hyperparameters were set to $\mu_0 = -5, 110, -110$, $\sigma^2_0 = 1$, $\nu_0 = 100$, $\Omega_0 = 20*I_3$
+```{r regressionCurves, echo = FALSE, out.height="50%", message=FALSE, fig.show="hold", out.width="50%", fig.cap="Default regression curves and regression curves after tuning of prior hyperparameters"}
+knitr::include_graphics(c("./defaultregressionCurvess.pdf", "./regressionCurves.pdf"))
+```
+
+### Code for question 1a
+```{r eval=FALSE, echo=TRUE}
+########
+## subass a) 
+## Use the conjugate prior for the inear regression model. The prior 
+## hyperparameters mu0, v0, and sig ma^2_0  shall be set to sensible values. 
+## start with mu_0 = (-10, 100, -100)^T, Omega_0 = 0.01 * I_3, v_0 = 4 and 
+## sigma^2_0 = 1. 
+# where beta_0,1,2 are the regression coefficients
+# y|beta,sigma^2, X~N(X*beta, sigma^2*I_n)
+
+
+library(mvtnorm)
+set.seed(12345)
+
+# Function for calculating the temperature
+calculateTemp <- function(beta0, beta1, beta2, time, error){
+  return(beta0 + beta1 * time + beta2 * time^2 + error) 
+}
+
+
+data <- read.table('tempLinkoping.txt')
+colnames(data) <- c("time", "temp") 
+data <- data[-1,]
+data$temp  <- as.numeric(data$temp)
+data$time <- as.numeric(data$time)
+
+# what's the avg temp in july?
+#tempp <-0
+#for (i in 180:210){
+#  tempp <-tempp + data$temp[i]
+#}
+#avgtemp <- tempp/30
+
+# what's the avg temp i Feb? seems to be colder than jan
+#tempp <-0
+#for (i in 30:60){
+#  tempp <-tempp + data$temp[i]
+#}
+#avgtemp <- tempp/30
+
+sigmaSquared0 <- 1
+v0 <- 100
+mu0 <- c(-5,110,-110) 
+omega0 <- 20 *diag(3) 
+nDraws <- 500
+# Simulating from the prior: draw X ~chisq(v0)
+xDraws <- rchisq(nDraws, v0)
+# compute sigma^2 = (df*sample variance/X)
+sigmaSquared <- v0*sigmaSquared0/xDraws
+
+# Draw Betas from the N~(u_0, sigma^2*CovarianceMatrix)
+betaDraws <- matrix(0, nrow=nDraws, ncol=length(mu0))
+for (i in 1:nDraws){
+  betaDraws[i,] <- rmvnorm(n=1, mean=mu0, sigma=sigmaSquared[i]*solve(omega0))
+}
+
+errorDraws <- c()
+for (i in 1:nDraws){
+  errorDraws[i] <- rnorm(n=1, mean=0, sd=sigmaSquared[i])
+}
+
+regressionCurves <- matrix(0, nrow=length(data$time), ncol=nDraws)
+for (i in 1:nDraws){
+  regressionCurves[,i]<-calculateTemp(betaDraws[i,1], 
+                                      betaDraws[i,2], 
+                                      betaDraws[i,3], 
+                                      data$time, 
+                                      errorDraws[i])
+}
+
+plot(regressionCurves[,1],
+     ylim=c(-10,25),
+     xlab="Day of Year",
+     ylab="Temperature")
+for (i in 2:nDraws){
+  lines(regressionCurves[,i])
+}
+
+
+```
+
+## Question b)
+A fuction was written to simulate draws from the joint posterior distribution of $\beta_0$, $\beta_1$, $\beta_2$ and $\sigma*2$. To simulate from the posterior we have that $$\sigma^2 | y \sim Inv - \chi^2(\nu_n, \sigma^2_n)$$ and $$\beta | \sigma^2 \sim N[\mu_n, \sigma^2\Omega^{-1}_n]$$ To simulate the draws of $\sigma^2$ the same procedure as in a) was used. For $\beta$ the simulated $\sigma^2$:s were used to draw values from the multivariate normal distribution. The marginal posterior distribution of the parameters are shown in the histograms below. 
+
+```{r marginal, echo = FALSE, out.height="50%", message=FALSE, fig.show="hold", out.width="50%", fig.cap="Histograms for the marginal posterior of $beta_0$, $beta_1$, $beta_2$ and $sigma^2$"}
+knitr::include_graphics(c("./histBeta_0.pdf", "./histBeta_1.pdf",  "./histBeta_2.pdf",  "./histSigma.pdf" ))
+```
+\newpage
+
+### Question b ii)
+A scatter plot of the temperature data was made. By calculating the temperature of all the times for each draw of the $\beta$:s, the plot was overlain with the posterior median of all the times. The scatter plot was also overlain with the 95% equal tail posterior probability interval. What can be concluded is that the 95% equal tail posterior probability interval does not include most of the data points which is due to the fact that the probability intervals are the probability intervals of our posterior and not of the actual data points. 
+
+```{r scatter, echo = FALSE, message=FALSE, fig.align='center', out.width='0.5\\linewidth', fig.pos="H"}
+knitr::include_graphics("./scatter.pdf")
+```
+
+### Code for question 1b
+```{r eval=FALSE, echo=TRUE}
+## subass b) 
+# Write a function that simulates draws from the joint posterior distribution 
+# of beta 0, beta1, beta2, sigma^2
+
+# calculate b_hat from slide 4, lecture 5
+# we need to set the x values in matrix form 
+# xi1 = 1 for all i to be able to multiply with beta0. 
+# xi2 = time, xi3 = time^2
+X <- cbind(1, data$time, data$time^2)
+
+mu0<-matrix(mu0)
+
+b_hat <- solve(t(X)%*%X) %*% t(X) %*% data$temp
+
+mu_n <- solve(( t(X) %*% X ) + omega0) %*%
+  ( t(X) %*% X %*% b_hat + omega0 %*% mu0)
+
+omega_n <- t(X) %*% X + omega0
+
+v_n <- v0 + length(data$time)
+
+vn_sigmaSq_n <- v0*sigmaSquared0 +
+  (t(data$temp) %*% data$temp + 
+     (t(mu0) %*% omega0 %*% mu0) - (t(mu_n) %*% omega_n %*% mu_n))
+
+sigmaSq_n <- vn_sigmaSq_n/v_n
+
+# Simulating sigma^2 from the joint posterior distribution
+# Draw X ~ chi^2(v_n)
+xDrawsPost <- rchisq(nDraws, v_n)
+
+# Compute sigma^2 = v_n * sigma^2_n
+sigmaSquared_post <- v_n*sigmaSq_n[1,1]/xDrawsPost
+
+
+# simulating betas
+betaDrawsPost <- matrix(0, nrow=nDraws, ncol=length(mu_n))
+for (i in 1:nDraws){
+  betaDrawsPost[i,] <- rmvnorm(n=1, mean=mu_n, sigma=sigmaSquared_n[i]*solve(omega_n))
+}
+
+pdf("histBeta_0.pdf")
+  hist(betaDrawsPost[,1],
+       xlab="Beta_0",
+       main="Marginal Posterior of Beta_0")
+dev.off()
+
+
+pdf("histBeta_1.pdf")
+hist(betaDrawsPost[,2],
+     xlab="Beta_1",
+     main="Marginal Posterior of Beta_1")
+dev.off()
+
+
+
+pdf("histBeta_2.pdf")
+hist(betaDrawsPost[,3],
+     xlab="Beta_2",
+     main="Marginal Posterior of Beta_2")
+dev.off()
+pdf("histSigma.pdf")
+hist(sigmaSquared_post,
+     xlab="Sigma^2",
+     main="Marginal Posterior of sigma^2")
+dev.off()
+### ii) 
+# Make a scatter plot of the temperature data and overlay a curve for the 
+# posterior median of the regression function f(time) = beta_0 + beta_1*time +
+# beta_0 * time^2 . Also, overlay curves for the 95% equal tail intervals of 
+# f(time)
+
+# For every draw of betas, calculate temp for each of the times
+# Getting a 365x500 matrix, columns are temp values for each draw of betas
+# for a specific time
+
+# Regression Function without error term 
+calculateTemp2 <- function(beta0, beta1, beta2, time){
+  return(beta0 + beta1 * time + beta2 * time^2) 
+}
+
+tempEstimates <- matrix(0, ncol=nDraws, nrow=length(data$time))
+for (i in 1:length(data$time)){
+  for (j in 1:nDraws){
+    tempEstimates[i,j] <- calculateTemp2(betaDrawsPost[j,1],
+                                        betaDrawsPost[j,2],
+                                        betaDrawsPost[j,3], 
+                                        data$time[i])
+  }
+}
+
+tempMedians <- c()
+tempQuants <- matrix(0, nrow=length(data$time), ncol=2)
+for (i in 1:length(data$time)){
+  tempMedians[i] <- median(tempEstimates[i,])
+  tempQuants[i,]=quantile(tempEstimates[i,], probs=c(0.025, 0.975))
+  
+}
+
+plot(data$temp,
+     xlab="Days",
+     ylab="Temperature")
+lines(tempMedians, 
+      col="blue")
+lines(tempQuants[,1],
+      col="darkgreen")
+lines(tempQuants[,2],
+      col="darkgreen")
+legend("topright",
+       c("Median", "95% equal tail posterior prob Interval"),
+       fill=c("blue", "darkgreen"),
+       cex=0.5
+       )
+```
+
+## Question c)
+To located the time where the temperature is the maximal, i.e max(f(time)), we can take the derivative of the f(time) function and set it equal to 0. So we get $$df(time) = time + 2\beta_2*time$$.
+$$\beta_1 + 2\beta_2*time = 0 \iff time = {-\beta_1 \over 2\beta_2}$$
+For each of the draws, we can then calculate the time that gives the maximum value of the temperature. We call this value $\tilde{x}$ and the simulated posterior distribution of $\tilde{x}$ can be seen in the histograms below. 
+
+\newpage
+
+```{r xtilde, echo = FALSE, out.height="50%", message=FALSE, fig.show="hold", out.width="50%", fig.cap="posterior distribution of x tilde in percentage of days and in days"}
+knitr::include_graphics(c("./histxTilde.pdf", "./histxTildeDays.pdf"))
+```
+
+
+### Code for question 1c
+```{r eval=FALSE, echo=TRUE}
+
+# subass c) 
+# to locate the time with the highest expected temperature, we want to find the 
+# the x value where the derivative is 0. (x = time). By taking the derivative of 
+# c + ax + bx^2  with regards to x we obtain a + 2bx = 0 -> x = -a/2b
+
+xTildes <- c()
+for (i in 1:nDraws){
+  xTildes[i] <- -betaDrawsPost[i,2]/(2*betaDrawsPost[i,3])
+}
+
+hist(xTildes)
+
+hist(xTildes*365,
+     xlab="Days")
+
+```
+
+
+## Question d)
+To suggest a suitable prior that mitigates the risk of overfitting the data due to too many orders of the polynomial model, one can look at decreasing the inital value of the $\beta$:s by setting $\mu_{3-7}$ to reasonably small values. One can also decrease the risk of overfitting by introducing a penalty term $\lambda$ in the $\Omega_0$ hyperparameter. This is done by setting $\Omega_0$ to $\lambda*I$ and makes the linear regression model into a ridge regression model. A larger lambda gives a smoother fit and more shrinkage, i.e less overfitting. The reason for this is that $\Omega_0$ is the precision matrix whereas $\Omega^{-1}_0$ is the covariance matrix. So a large value of the precision matrix gives us a low value of the covariance matrix. 
+
